@@ -6,6 +6,7 @@ extern crate tracing;
 pub mod constants;
 pub mod executor;
 pub mod protocol;
+pub mod query_context;
 pub mod query_document;
 pub mod query_graph_builder;
 pub mod relation_load_strategy;
@@ -16,6 +17,7 @@ pub use self::{
     executor::{QueryExecutor, TransactionOptions, with_sync_unevaluated_request_context},
     interactive_transactions::{TransactionError, TxId},
     query_ast::*,
+    query_context::QueryContext,
     query_document::*,
     query_graph::*,
     query_graph_builder::*,

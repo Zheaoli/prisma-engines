@@ -31,7 +31,7 @@ async fn generate_id(
         let mut id_select = Select::default();
         id_select.extend(defaults);
 
-        let pk_select = id_select.add_traceparent(ctx.traceparent());
+        let pk_select = id_select.add_trace_id(ctx);
         let pk_result = conn.query(pk_select.into()).await?;
         let result = try_convert(&(id_field.into()), pk_result)?;
 

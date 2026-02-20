@@ -268,7 +268,7 @@ pub(crate) trait JoinSelectBuilder {
             .with_ordering(args, Some(table_alias.to_string()), ctx)
             .with_filters(args.filter.clone(), Some(table_alias), ctx)
             .with_pagination(args, None)
-            .add_traceparent(ctx.traceparent);
+            .add_trace_id(ctx);
 
         (select, table_alias)
     }

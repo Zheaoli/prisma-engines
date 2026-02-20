@@ -1,12 +1,16 @@
 use indexmap::IndexMap;
 use query_core::{
-    BatchDocument, BatchDocumentTransaction, Operation, QueryDocument,
+    BatchDocument, BatchDocumentTransaction, QueryDocument,
     schema::{QuerySchemaRef, QueryTag},
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tracing::info_span;
 
 use super::protocol_adapter::JsonProtocolAdapter;
+
+/// SQL comments extracted from each query in the request, paired with the QueryDocument.
+pub type SqlCommentsVec = Vec<Vec<(String, String)>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", untagged)]
@@ -16,22 +20,27 @@ pub enum JsonBody {
 }
 
 impl JsonBody {
-    /// Convert a `JsonBody` into a `QueryDocument`.
-    pub fn into_doc(self, query_schema: &QuerySchemaRef) -> crate::Result<QueryDocument> {
+    /// Convert a `JsonBody` into a `QueryDocument`, also extracting per-query SQL comments.
+    /// Returns `(QueryDocument, SqlCommentsVec)` where each entry in SqlCommentsVec corresponds
+    /// to one query in the document (single: 1 entry, batch: N entries).
+    pub fn into_doc(self, query_schema: &QuerySchemaRef) -> crate::Result<(QueryDocument, SqlCommentsVec)> {
         let _span = info_span!("prisma:engine:into_doc").entered();
         match self {
             JsonBody::Single(query) => {
+                let sql_comments = extract_sql_comments(&query.sql_comments);
                 let operation = JsonProtocolAdapter::new(query_schema).convert_single(query)?;
 
-                Ok(QueryDocument::Single(operation))
+                Ok((QueryDocument::Single(operation), vec![sql_comments]))
             }
             JsonBody::Batch(query) => {
                 let mut protocol_adapter = JsonProtocolAdapter::new(query_schema);
-                let operations: crate::Result<Vec<Operation>> = query
-                    .batch
-                    .into_iter()
-                    .map(|single_query| protocol_adapter.convert_single(single_query))
-                    .collect();
+                let mut all_sql_comments = Vec::with_capacity(query.batch.len());
+                let mut operations = Vec::with_capacity(query.batch.len());
+
+                for single_query in query.batch {
+                    all_sql_comments.push(extract_sql_comments(&single_query.sql_comments));
+                    operations.push(protocol_adapter.convert_single(single_query)?);
+                }
 
                 let transaction = if let Some(opts) = query.transaction {
                     Some(BatchDocumentTransaction::new(opts.isolation_level))
@@ -39,10 +48,20 @@ impl JsonBody {
                     None
                 };
 
-                Ok(QueryDocument::Multi(BatchDocument::new(operations?, transaction)))
+                Ok((
+                    QueryDocument::Multi(BatchDocument::new(operations, transaction)),
+                    all_sql_comments,
+                ))
             }
         }
     }
+}
+
+fn extract_sql_comments(comments: &Option<HashMap<String, String>>) -> Vec<(String, String)> {
+    comments
+        .as_ref()
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -51,6 +70,8 @@ pub struct JsonSingleQuery {
     pub model_name: Option<String>,
     pub action: Action,
     pub query: FieldQuery,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql_comments: Option<HashMap<String, String>>,
 }
 
 impl JsonSingleQuery {
@@ -182,5 +203,159 @@ impl Serialize for SelectionSet {
         S: serde::Serializer,
     {
         self.0.serialize(serializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialize_single_query_with_sql_comments() {
+        let json = r#"{
+            "modelName": "User",
+            "action": "findMany",
+            "query": {
+                "arguments": {},
+                "selection": { "$scalars": true }
+            },
+            "sqlComments": {
+                "route": "/api/users",
+                "controller": "UserController"
+            }
+        }"#;
+
+        let body: JsonBody = serde_json::from_str(json).unwrap();
+        match body {
+            JsonBody::Single(query) => {
+                assert!(query.sql_comments.is_some());
+                let comments = query.sql_comments.unwrap();
+                assert_eq!(comments.get("route").unwrap(), "/api/users");
+                assert_eq!(comments.get("controller").unwrap(), "UserController");
+            }
+            _ => panic!("Expected JsonBody::Single"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_single_query_without_sql_comments() {
+        let json = r#"{
+            "modelName": "User",
+            "action": "findMany",
+            "query": {
+                "arguments": {},
+                "selection": { "$scalars": true }
+            }
+        }"#;
+
+        let body: JsonBody = serde_json::from_str(json).unwrap();
+        match body {
+            JsonBody::Single(query) => {
+                assert!(query.sql_comments.is_none());
+            }
+            _ => panic!("Expected JsonBody::Single"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_batch_query_with_sql_comments() {
+        let json = r#"{
+            "batch": [
+                {
+                    "modelName": "User",
+                    "action": "findMany",
+                    "query": {
+                        "arguments": {},
+                        "selection": { "$scalars": true }
+                    },
+                    "sqlComments": { "route": "/api/users" }
+                },
+                {
+                    "modelName": "Post",
+                    "action": "findMany",
+                    "query": {
+                        "arguments": {},
+                        "selection": { "$scalars": true }
+                    },
+                    "sqlComments": { "route": "/api/posts" }
+                }
+            ]
+        }"#;
+
+        let body: JsonBody = serde_json::from_str(json).unwrap();
+        match body {
+            JsonBody::Batch(batch) => {
+                assert_eq!(batch.batch.len(), 2);
+                assert_eq!(
+                    batch.batch[0].sql_comments.as_ref().unwrap().get("route").unwrap(),
+                    "/api/users"
+                );
+                assert_eq!(
+                    batch.batch[1].sql_comments.as_ref().unwrap().get("route").unwrap(),
+                    "/api/posts"
+                );
+            }
+            _ => panic!("Expected JsonBody::Batch"),
+        }
+    }
+
+    #[test]
+    fn test_extract_sql_comments_with_values() {
+        let mut map = HashMap::new();
+        map.insert("route".to_string(), "/api".to_string());
+        map.insert("controller".to_string(), "UserCtrl".to_string());
+        let result = extract_sql_comments(&Some(map));
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&("route".to_string(), "/api".to_string())));
+        assert!(result.contains(&("controller".to_string(), "UserCtrl".to_string())));
+    }
+
+    #[test]
+    fn test_extract_sql_comments_with_none() {
+        let result = extract_sql_comments(&None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_sql_comments_with_empty_map() {
+        let map = HashMap::new();
+        let result = extract_sql_comments(&Some(map));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_serialize_single_query_with_sql_comments() {
+        let mut comments = HashMap::new();
+        comments.insert("route".to_string(), "/api/users".to_string());
+
+        let query = JsonSingleQuery {
+            model_name: Some("User".to_string()),
+            action: Action::new(QueryTag::FindMany),
+            query: FieldQuery {
+                arguments: None,
+                selection: SelectionSet::new(IndexMap::new()),
+            },
+            sql_comments: Some(comments),
+        };
+
+        let json = serde_json::to_string(&query).unwrap();
+        assert!(json.contains("sqlComments"));
+        assert!(json.contains("/api/users"));
+    }
+
+    #[test]
+    fn test_serialize_single_query_without_sql_comments_omits_field() {
+        let query = JsonSingleQuery {
+            model_name: Some("User".to_string()),
+            action: Action::new(QueryTag::FindMany),
+            query: FieldQuery {
+                arguments: None,
+                selection: SelectionSet::new(IndexMap::new()),
+            },
+            sql_comments: None,
+        };
+
+        let json = serde_json::to_string(&query).unwrap();
+        assert!(!json.contains("sqlComments"));
     }
 }

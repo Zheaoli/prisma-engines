@@ -11,7 +11,7 @@ use query_structure::{
 };
 use sql_query_builder::Context;
 use std::collections::HashMap;
-use telemetry::TraceParent;
+use telemetry::SqlTrace;
 
 pub struct SqlConnectorTransaction<'tx> {
     inner: Box<dyn quaint::connector::Transaction + 'tx>,
@@ -75,9 +75,9 @@ impl ReadOperations for SqlConnectorTransaction<'_> {
         filter: &Filter,
         selected_fields: &FieldSelection,
         relation_load_strategy: RelationLoadStrategy,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Option<SingleRecord>> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             read::get_single_record(
@@ -98,9 +98,9 @@ impl ReadOperations for SqlConnectorTransaction<'_> {
         query_arguments: QueryArguments,
         selected_fields: &FieldSelection,
         relation_load_strategy: RelationLoadStrategy,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<ManyRecords> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             read::get_many_records(
@@ -119,9 +119,9 @@ impl ReadOperations for SqlConnectorTransaction<'_> {
         &mut self,
         from_field: &RelationFieldRef,
         from_record_ids: &[SelectionResult],
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Vec<(SelectionResult, SelectionResult)>> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(&self.connection_info, async {
             read::get_related_m2m_record_ids(self.inner.as_queryable(), from_field, from_record_ids, &ctx).await
         })
@@ -135,9 +135,9 @@ impl ReadOperations for SqlConnectorTransaction<'_> {
         selections: Vec<AggregationSelection>,
         group_by: Vec<ScalarFieldRef>,
         having: Option<Filter>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Vec<AggregationRow>> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             read::aggregate(
@@ -161,9 +161,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         model: &Model,
         args: WriteArgs,
         selected_fields: FieldSelection,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<SingleRecord> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::create_record(
@@ -183,9 +183,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         model: &Model,
         args: Vec<WriteArgs>,
         skip_duplicates: bool,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<usize> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::create_records_count(self.inner.as_queryable(), model, args, skip_duplicates, &ctx),
@@ -199,9 +199,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         args: Vec<WriteArgs>,
         skip_duplicates: bool,
         selected_fields: FieldSelection,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<ManyRecords> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::create_records_returning(
@@ -222,9 +222,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         record_filter: RecordFilter,
         args: WriteArgs,
         limit: Option<usize>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<usize> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::update_records(self.inner.as_queryable(), model, record_filter, args, limit, &ctx),
@@ -239,9 +239,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         args: WriteArgs,
         selected_fields: FieldSelection,
         limit: Option<usize>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<ManyRecords> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::update_records_returning(
@@ -263,9 +263,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         record_filter: RecordFilter,
         args: WriteArgs,
         selected_fields: Option<FieldSelection>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Option<SingleRecord>> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::update_record(
@@ -285,10 +285,10 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         model: &Model,
         record_filter: RecordFilter,
         limit: Option<usize>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<usize> {
         catch(&self.connection_info, async {
-            let ctx = Context::new(&self.connection_info, traceparent);
+            let ctx = Context::new(&self.connection_info, trace);
             write::delete_records(self.inner.as_queryable(), model, record_filter, limit, &ctx).await
         })
         .await
@@ -299,9 +299,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         model: &Model,
         record_filter: RecordFilter,
         selected_fields: FieldSelection,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<SingleRecord> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::delete_record(self.inner.as_queryable(), model, record_filter, selected_fields, &ctx),
@@ -312,10 +312,10 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
     async fn native_upsert_record(
         &mut self,
         upsert: connector_interface::NativeUpsert,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<SingleRecord> {
         catch(&self.connection_info, async {
-            let ctx = Context::new(&self.connection_info, traceparent);
+            let ctx = Context::new(&self.connection_info, trace);
             upsert::native_upsert(self.inner.as_queryable(), upsert, &ctx).await
         })
         .await
@@ -326,10 +326,10 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         field: &RelationFieldRef,
         parent_id: &SelectionResult,
         child_ids: &[SelectionResult],
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<()> {
         catch(&self.connection_info, async {
-            let ctx = Context::new(&self.connection_info, traceparent);
+            let ctx = Context::new(&self.connection_info, trace);
             write::m2m_connect(self.inner.as_queryable(), field, parent_id, child_ids, &ctx).await
         })
         .await
@@ -340,9 +340,9 @@ impl WriteOperations for SqlConnectorTransaction<'_> {
         field: &RelationFieldRef,
         parent_id: &SelectionResult,
         child_ids: &[SelectionResult],
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<()> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::m2m_disconnect(self.inner.as_queryable(), field, parent_id, child_ids, &ctx),

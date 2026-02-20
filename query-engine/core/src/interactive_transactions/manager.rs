@@ -1,4 +1,4 @@
-use crate::{ClosedTransaction, InteractiveTransaction, Operation, ResponseData};
+use crate::{ClosedTransaction, InteractiveTransaction, Operation, QueryContext, ResponseData};
 use connector::Connection;
 use lru::LruCache;
 use schema::QuerySchemaRef;
@@ -6,7 +6,6 @@ use std::{
     collections::HashMap,
     sync::{Arc, LazyLock},
 };
-use telemetry::TraceParent;
 use tokio::{
     sync::{
         Mutex, RwLock,
@@ -155,13 +154,13 @@ impl ItxManager {
         &self,
         tx_id: &TxId,
         operation: Operation,
-        traceparent: Option<TraceParent>,
+        query_context: QueryContext,
     ) -> crate::Result<ResponseData> {
         self.get_transaction(tx_id, "query")
             .await?
             .lock()
             .await
-            .execute_single(&operation, traceparent)
+            .execute_single(&operation, query_context)
             .await
     }
 
@@ -169,13 +168,13 @@ impl ItxManager {
         &self,
         tx_id: &TxId,
         operations: Vec<Operation>,
-        traceparent: Option<TraceParent>,
+        query_contexts: Vec<QueryContext>,
     ) -> crate::Result<Vec<crate::Result<ResponseData>>> {
         self.get_transaction(tx_id, "batch query")
             .await?
             .lock()
             .await
-            .execute_batch(&operations, traceparent)
+            .execute_batch(&operations, &query_contexts)
             .await
     }
 

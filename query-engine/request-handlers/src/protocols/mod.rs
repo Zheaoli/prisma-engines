@@ -4,6 +4,8 @@ pub mod json;
 
 use query_core::{QueryDocument, protocol::EngineProtocol, schema::QuerySchemaRef};
 
+use self::json::SqlCommentsVec;
+
 #[derive(Debug)]
 pub enum RequestBody {
     #[cfg(feature = "graphql-protocol")]
@@ -12,10 +14,10 @@ pub enum RequestBody {
 }
 
 impl RequestBody {
-    pub fn into_doc(self, query_schema: &QuerySchemaRef) -> crate::Result<QueryDocument> {
+    pub fn into_doc(self, query_schema: &QuerySchemaRef) -> crate::Result<(QueryDocument, SqlCommentsVec)> {
         match self {
             #[cfg(feature = "graphql-protocol")]
-            RequestBody::Graphql(body) => body.into_doc(),
+            RequestBody::Graphql(body) => body.into_doc().map(|doc| (doc, vec![])),
             RequestBody::Json(body) => body.into_doc(query_schema),
         }
     }

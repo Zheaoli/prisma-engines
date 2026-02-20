@@ -35,7 +35,7 @@ pub fn create_record(
 
     Insert::from(insert)
         .returning(selected_fields.as_columns(ctx).map(|c| c.set_is_selected(true)))
-        .add_traceparent(ctx.traceparent)
+        .add_trace_id(ctx)
 }
 
 /// `INSERT` new records into the database based on the given write arguments,
@@ -88,7 +88,7 @@ pub fn create_records_nonempty(
     let insert = Insert::multi_into(model.as_table(ctx), columns);
     let insert = values.into_iter().fold(insert, |stmt, values| stmt.values(values));
     let insert: Insert = insert.into();
-    let mut insert = insert.add_traceparent(ctx.traceparent);
+    let mut insert = insert.add_trace_id(ctx);
 
     if let Some(selected_fields) = selected_fields {
         insert = insert.returning(projection_into_columns(selected_fields, ctx));
@@ -127,7 +127,7 @@ pub fn create_records_empty(
     ctx: &Context<'_>,
 ) -> Insert<'static> {
     let insert: Insert<'static> = Insert::single_into(model.as_table(ctx)).into();
-    let mut insert = insert.add_traceparent(ctx.traceparent);
+    let mut insert = insert.add_trace_id(ctx);
 
     if let Some(selected_fields) = selected_fields {
         insert = insert.returning(projection_into_columns(selected_fields, ctx));
@@ -197,7 +197,7 @@ pub fn build_update_and_set_query(
             acc.set(name, value)
         });
 
-    let query = query.add_traceparent(ctx.traceparent);
+    let query = query.add_trace_id(ctx);
 
     if let Some(selected_fields) = selected_fields {
         query.returning(selected_fields.as_columns(ctx).map(|c| c.set_is_selected(true)))
@@ -280,7 +280,7 @@ pub fn delete_returning(
     Delete::from_table(model.as_table(ctx))
         .so_that(filter)
         .returning(projection_into_columns(selected_fields, ctx))
-        .add_traceparent(ctx.traceparent)
+        .add_trace_id(ctx)
         .into()
 }
 
@@ -294,7 +294,7 @@ pub fn delete_many_from_filter(
 
     Delete::from_table(model.as_table(ctx))
         .so_that(filter_condition)
-        .add_traceparent(ctx.traceparent)
+        .add_trace_id(ctx)
         .into()
 }
 
@@ -367,7 +367,7 @@ pub fn delete_relation_table_records(
 
     Delete::from_table(relation.as_table(ctx))
         .so_that(parent_id_criteria.and(child_id_criteria))
-        .add_traceparent(ctx.traceparent)
+        .add_trace_id(ctx)
 }
 
 /// Generates a list of insert statements to execute. If `selected_fields` is set, insert statements

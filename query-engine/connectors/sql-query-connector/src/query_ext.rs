@@ -23,7 +23,7 @@ impl<Q: Queryable + ?Sized> QueryExt for Q {
         let span = info_span!("prisma:engine:filter_read_query");
 
         let q = match q {
-            Query::Select(x) => Query::Select(Box::from(x.add_traceparent(ctx.traceparent()))),
+            Query::Select(x) => Query::Select(Box::from(x.add_trace_id(ctx))),
             q => q,
         };
 
@@ -111,7 +111,7 @@ impl<Q: Queryable + ?Sized> QueryExt for Q {
 
         let select = Select::from_table(model.as_table(ctx))
             .columns(id_cols)
-            .add_traceparent(ctx.traceparent())
+            .add_trace_id(ctx)
             .so_that(condition);
 
         self.select_ids(select, model_id, ctx).await

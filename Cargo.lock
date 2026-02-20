@@ -3995,6 +3995,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sql-query-builder",
+ "telemetry",
  "thiserror 2.0.12",
 ]
 

@@ -17,8 +17,8 @@ pub use request_context::*;
 pub use telemetry::TraceParent;
 
 use crate::{
-    BatchDocumentTransaction, TxId, protocol::EngineProtocol, query_document::Operation, response_ir::ResponseData,
-    schema::QuerySchemaRef,
+    BatchDocumentTransaction, QueryContext, TxId, protocol::EngineProtocol, query_document::Operation,
+    response_ir::ResponseData, schema::QuerySchemaRef,
 };
 use async_trait::async_trait;
 use connector::Connector;
@@ -35,7 +35,7 @@ pub trait QueryExecutor: TransactionManager {
         tx_id: Option<TxId>,
         operation: Operation,
         query_schema: QuerySchemaRef,
-        traceparent: Option<TraceParent>,
+        query_context: QueryContext,
         engine_protocol: EngineProtocol,
     ) -> crate::Result<ResponseData>;
 
@@ -51,7 +51,7 @@ pub trait QueryExecutor: TransactionManager {
         operations: Vec<Operation>,
         transaction: Option<BatchDocumentTransaction>,
         query_schema: QuerySchemaRef,
-        traceparent: Option<TraceParent>,
+        query_contexts: Vec<QueryContext>,
         engine_protocol: EngineProtocol,
     ) -> crate::Result<Vec<crate::Result<ResponseData>>>;
 

@@ -1,13 +1,14 @@
 use std::sync::{self, atomic::AtomicUsize};
 
 use quaint::prelude::{ConnectionInfo, SqlFamily};
-use telemetry::TraceParent;
+use telemetry::{SqlTrace, TraceParent};
 
 use crate::filter::alias::Alias;
 
 pub struct Context<'a> {
     connection_info: &'a ConnectionInfo,
     pub(crate) traceparent: Option<TraceParent>,
+    pub(crate) sql_comments: Vec<(String, String)>,
     /// Maximum rows allowed at once for an insert query.
     /// None is unlimited.
     pub(crate) max_insert_rows: Option<usize>,
@@ -19,13 +20,14 @@ pub struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    pub fn new(connection_info: &'a ConnectionInfo, traceparent: Option<TraceParent>) -> Self {
+    pub fn new(connection_info: &'a ConnectionInfo, trace: SqlTrace) -> Self {
         let max_insert_rows = connection_info.max_insert_rows();
         let max_bind_values = connection_info.max_bind_values();
 
         Context {
             connection_info,
-            traceparent,
+            traceparent: trace.traceparent,
+            sql_comments: trace.sql_comments,
             max_insert_rows,
             max_bind_values: Some(max_bind_values),
 
@@ -35,6 +37,10 @@ impl<'a> Context<'a> {
 
     pub fn traceparent(&self) -> Option<TraceParent> {
         self.traceparent
+    }
+
+    pub fn sql_comments(&self) -> &[(String, String)] {
+        &self.sql_comments
     }
 
     pub(crate) fn schema_name(&self) -> Option<&str> {

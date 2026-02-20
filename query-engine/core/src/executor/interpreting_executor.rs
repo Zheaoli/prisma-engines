@@ -1,6 +1,7 @@
 use super::execute_operation::{execute_many_operations, execute_many_self_contained, execute_single_self_contained};
 use super::request_context;
 use crate::ItxManager;
+use crate::QueryContext;
 use crate::{
     BatchDocumentTransaction, CoreError, Operation, QueryExecutor, ResponseData, TransactionError, TransactionManager,
     TransactionOptions, TxId, protocol::EngineProtocol,
@@ -9,7 +10,6 @@ use crate::{
 use async_trait::async_trait;
 use connector::Connector;
 use schema::QuerySchemaRef;
-use telemetry::TraceParent;
 use tokio::time::Duration;
 use tracing_futures::Instrument;
 
@@ -50,18 +50,20 @@ where
         tx_id: Option<TxId>,
         operation: Operation,
         query_schema: QuerySchemaRef,
-        traceparent: Option<TraceParent>,
+        query_context: QueryContext,
         engine_protocol: EngineProtocol,
     ) -> crate::Result<ResponseData> {
         request_context::with_request_context(engine_protocol, async move {
             if let Some(tx_id) = tx_id {
-                self.itx_manager.execute(&tx_id, operation, traceparent).await
+                self.itx_manager
+                    .execute(&tx_id, operation, query_context)
+                    .await
             } else {
                 execute_single_self_contained(
                     &self.connector,
                     query_schema,
                     operation,
-                    traceparent,
+                    query_context,
                     self.force_transactions,
                 )
                 .await
@@ -88,7 +90,7 @@ where
         operations: Vec<Operation>,
         transaction: Option<BatchDocumentTransaction>,
         query_schema: QuerySchemaRef,
-        traceparent: Option<TraceParent>,
+        query_contexts: Vec<QueryContext>,
         engine_protocol: EngineProtocol,
     ) -> crate::Result<Vec<crate::Result<ResponseData>>> {
         request_context::with_request_context(engine_protocol, async move {
@@ -99,7 +101,7 @@ where
                         "Can not set batch isolation level within interactive transaction".into(),
                     ));
                 }
-                self.itx_manager.batch_execute(&tx_id, operations, traceparent).await
+                self.itx_manager.batch_execute(&tx_id, operations, query_contexts).await
             } else if let Some(transaction) = transaction {
                 let conn_span = info_span!(
                     "prisma:engine:connection",
@@ -110,7 +112,7 @@ where
                 let mut tx = conn.start_transaction(transaction.isolation_level()).await?;
 
                 let results =
-                    execute_many_operations(query_schema, tx.as_connection_like(), &operations, traceparent).await;
+                    execute_many_operations(query_schema, tx.as_connection_like(), &operations, &query_contexts).await;
 
                 if results.is_err() {
                     tx.rollback().await?;
@@ -124,7 +126,7 @@ where
                     &self.connector,
                     query_schema,
                     &operations,
-                    traceparent,
+                    &query_contexts,
                     self.force_transactions,
                     engine_protocol,
                 )

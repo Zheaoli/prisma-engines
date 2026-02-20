@@ -5,7 +5,7 @@ use futures::FutureExt;
 use indexmap::IndexMap;
 use query_core::{
     ArgumentValue, ArgumentValueObject, BatchDocument, BatchDocumentTransaction, CompactedDocument, Operation,
-    QueryDocument, QueryExecutor, TxId,
+    QueryContext, QueryDocument, QueryExecutor, TxId,
     constants::custom_types,
     protocol::EngineProtocol,
     response_ir::{Item, ResponseData},
@@ -51,12 +51,18 @@ impl<'a> RequestHandler<'a> {
         tracing::debug!("Incoming GraphQL query: {:?}", &body);
 
         match body.into_doc(self.query_schema) {
-            Ok(QueryDocument::Single(query)) => self.handle_single(query, tx_id, traceparent).await,
-            Ok(QueryDocument::Multi(batch)) => match batch.compact(self.query_schema) {
+            Ok((QueryDocument::Single(query), sql_comments_vec)) => {
+                let query_context = QueryContext::new(traceparent, sql_comments_vec.into_iter().next().unwrap_or_default());
+                self.handle_single(query, tx_id, query_context).await
+            }
+            Ok((QueryDocument::Multi(batch), sql_comments_vec)) => match batch.compact(self.query_schema) {
                 BatchDocument::Multi(batch, transaction) => {
-                    self.handle_batch(batch, transaction, tx_id, traceparent).await
+                    self.handle_batch(batch, transaction, tx_id, traceparent, sql_comments_vec).await
                 }
-                BatchDocument::Compact(compacted) => self.handle_compacted(compacted, tx_id, traceparent).await,
+                BatchDocument::Compact(compacted) => {
+                    let query_context = QueryContext::new(traceparent, sql_comments_vec.into_iter().next().unwrap_or_default());
+                    self.handle_compacted(compacted, tx_id, query_context).await
+                }
             },
 
             Err(err) => PrismaResponse::Single(GQLError::from_handler_error(err).into()),
@@ -67,9 +73,9 @@ impl<'a> RequestHandler<'a> {
         &self,
         query: Operation,
         tx_id: Option<TxId>,
-        traceparent: Option<TraceParent>,
+        query_context: QueryContext,
     ) -> PrismaResponse {
-        let gql_response = match AssertUnwindSafe(self.handle_request(query, tx_id, traceparent))
+        let gql_response = match AssertUnwindSafe(self.handle_request(query, tx_id, query_context))
             .catch_unwind()
             .await
         {
@@ -87,13 +93,26 @@ impl<'a> RequestHandler<'a> {
         transaction: Option<BatchDocumentTransaction>,
         tx_id: Option<TxId>,
         traceparent: Option<TraceParent>,
+        sql_comments_vec: Vec<Vec<(String, String)>>,
     ) -> PrismaResponse {
+        // Build per-operation QueryContexts: shared traceparent, individual sql_comments
+        let query_contexts: Vec<QueryContext> = queries
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                QueryContext::new(
+                    traceparent,
+                    sql_comments_vec.get(i).cloned().unwrap_or_default(),
+                )
+            })
+            .collect();
+
         match AssertUnwindSafe(self.executor.execute_all(
             tx_id,
             queries,
             transaction,
             self.query_schema.clone(),
-            traceparent,
+            query_contexts,
             self.engine_protocol,
         ))
         .catch_unwind()
@@ -119,7 +138,7 @@ impl<'a> RequestHandler<'a> {
         &self,
         document: CompactedDocument,
         tx_id: Option<TxId>,
-        traceparent: Option<TraceParent>,
+        query_context: QueryContext,
     ) -> PrismaResponse {
         let plural_name = document.plural_name();
         let singular_name = document.single_name();
@@ -128,7 +147,7 @@ impl<'a> RequestHandler<'a> {
         let arguments = document.arguments;
         let nested_selection = document.nested_selection;
 
-        match AssertUnwindSafe(self.handle_request(document.operation, tx_id, traceparent))
+        match AssertUnwindSafe(self.handle_request(document.operation, tx_id, query_context))
             .catch_unwind()
             .await
         {
@@ -211,14 +230,14 @@ impl<'a> RequestHandler<'a> {
         &self,
         query_doc: Operation,
         tx_id: Option<TxId>,
-        traceparent: Option<TraceParent>,
+        query_context: QueryContext,
     ) -> query_core::Result<ResponseData> {
         self.executor
             .execute(
                 tx_id,
                 query_doc,
                 self.query_schema.clone(),
-                traceparent,
+                query_context,
                 self.engine_protocol,
             )
             .await

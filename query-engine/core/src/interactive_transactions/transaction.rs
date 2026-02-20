@@ -3,12 +3,12 @@
 use std::pin::Pin;
 
 use crate::{
-    CoreError, Operation, ResponseData, TransactionError, TxId, execute_many_operations, execute_single_operation,
+    CoreError, Operation, QueryContext, ResponseData, TransactionError, TxId, execute_many_operations,
+    execute_single_operation,
 };
 use connector::{Connection, Transaction};
 use crosstarget_utils::time::ElapsedTimeCounter;
 use schema::QuerySchemaRef;
-use telemetry::TraceParent;
 use tokio::time::Duration;
 use tracing::Span;
 use tracing_futures::Instrument;
@@ -164,7 +164,7 @@ impl InteractiveTransaction {
     pub async fn execute_single(
         &mut self,
         operation: &Operation,
-        traceparent: Option<TraceParent>,
+        query_context: QueryContext,
     ) -> crate::Result<ResponseData> {
         tx_timeout!(self, "query", async {
             let conn = self.state.as_open("query")?;
@@ -172,7 +172,7 @@ impl InteractiveTransaction {
                 self.query_schema.clone(),
                 conn.as_connection_like(),
                 operation,
-                traceparent,
+                query_context,
             )
             .instrument(info_span!("prisma:engine:itx_execute_single"))
             .await
@@ -182,7 +182,7 @@ impl InteractiveTransaction {
     pub async fn execute_batch(
         &mut self,
         operations: &[Operation],
-        traceparent: Option<TraceParent>,
+        query_contexts: &[QueryContext],
     ) -> crate::Result<Vec<crate::Result<ResponseData>>> {
         tx_timeout!(self, "batch query", async {
             let conn = self.state.as_open("batch query")?;
@@ -190,7 +190,7 @@ impl InteractiveTransaction {
                 self.query_schema.clone(),
                 conn.as_connection_like(),
                 operations,
-                traceparent,
+                query_contexts,
             )
             .instrument(info_span!("prisma:engine:itx_execute_batch"))
             .await

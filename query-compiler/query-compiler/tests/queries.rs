@@ -7,6 +7,7 @@ use query_structure::psl;
 use request_handlers::{JsonBody, JsonSingleQuery, RequestBody};
 use sql_query_builder::{Context, SqlQueryBuilder};
 use std::{fs, process::Command, sync::Arc};
+use telemetry::SqlTrace;
 
 #[test]
 fn queries() {
@@ -33,11 +34,14 @@ fn queries() {
         let query: JsonSingleQuery = serde_json::from_str(&query).unwrap();
 
         let request = RequestBody::Json(JsonBody::Single(query));
-        let doc = request.into_doc(&query_schema).unwrap();
+        let (doc, sql_comments_vec) = request.into_doc(&query_schema).unwrap();
 
         let QueryDocument::Single(query) = doc else {
             panic!("expected single query");
         };
+
+        // Extract sql_comments for this single query (first entry in the vec)
+        let sql_comments = sql_comments_vec.into_iter().next().unwrap_or_default();
 
         let (graph, _serializer) = QueryGraphBuilder::new(&query_schema)
             .without_eager_default_evaluation()
@@ -69,7 +73,8 @@ fn queries() {
             }
         });
 
-        let ctx = Context::new(&connection_info, None);
+        let trace = SqlTrace::new(None, sql_comments);
+        let ctx = Context::new(&connection_info, trace);
         let builder = SqlQueryBuilder::<Postgres<'_>>::new(ctx);
 
         let expr = query_compiler::translate(graph, &builder).unwrap();

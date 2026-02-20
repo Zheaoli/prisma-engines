@@ -1,24 +1,23 @@
 use super::{inmemory_record_processor::InMemoryRecordProcessor, *};
-use crate::{interpreter::InterpretationResult, query_ast::*, result_ast::*};
+use crate::{QueryContext, interpreter::InterpretationResult, query_ast::*, result_ast::*};
 use connector::{ConnectionLike, error::ConnectorError};
 use futures::future::{BoxFuture, FutureExt};
 use psl::can_support_relation_load_strategy;
 use query_structure::{ManyRecords, RelationLoadStrategy, RelationSelection};
-use telemetry::TraceParent;
 use user_facing_errors::KnownError;
 
 pub(crate) fn execute<'conn>(
     tx: &'conn mut dyn ConnectionLike,
     query: ReadQuery,
     parent_result: Option<&'conn ManyRecords>,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> BoxFuture<'conn, InterpretationResult<QueryResult>> {
     let fut = async move {
         match query {
-            ReadQuery::RecordQuery(q) => read_one(tx, q, traceparent).await,
-            ReadQuery::ManyRecordsQuery(q) => read_many(tx, q, traceparent).await,
-            ReadQuery::RelatedRecordsQuery(q) => read_related(tx, q, parent_result, traceparent).await,
-            ReadQuery::AggregateRecordsQuery(q) => aggregate(tx, q, traceparent).await,
+            ReadQuery::RecordQuery(q) => read_one(tx, q, query_context).await,
+            ReadQuery::ManyRecordsQuery(q) => read_many(tx, q, query_context).await,
+            ReadQuery::RelatedRecordsQuery(q) => read_related(tx, q, parent_result, query_context).await,
+            ReadQuery::AggregateRecordsQuery(q) => aggregate(tx, q, query_context).await,
         }
     };
 
@@ -29,7 +28,7 @@ pub(crate) fn execute<'conn>(
 fn read_one(
     tx: &mut dyn ConnectionLike,
     query: RecordQuery,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> BoxFuture<'_, InterpretationResult<QueryResult>> {
     let fut = async move {
         let model = query.model;
@@ -40,14 +39,14 @@ fn read_one(
                 &filter,
                 &query.selected_fields,
                 query.relation_load_strategy,
-                traceparent,
+                query_context.sql_trace(),
             )
             .await?;
 
         match record {
             Some(record) if query.relation_load_strategy.is_query() => {
                 let records = record.into();
-                let nested = process_nested(tx, query.nested, Some(&records), traceparent).await?;
+                let nested = process_nested(tx, query.nested, Some(&records), query_context).await?;
 
                 Ok(RecordSelection {
                     name: query.name,
@@ -98,18 +97,18 @@ fn read_one(
 fn read_many(
     tx: &mut dyn ConnectionLike,
     query: ManyRecordsQuery,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> BoxFuture<'_, InterpretationResult<QueryResult>> {
     match query.relation_load_strategy {
-        RelationLoadStrategy::Join => read_many_by_joins(tx, query, traceparent),
-        RelationLoadStrategy::Query => read_many_by_queries(tx, query, traceparent),
+        RelationLoadStrategy::Join => read_many_by_joins(tx, query, query_context),
+        RelationLoadStrategy::Query => read_many_by_queries(tx, query, query_context),
     }
 }
 
 fn read_many_by_queries(
     tx: &mut dyn ConnectionLike,
     mut query: ManyRecordsQuery,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> BoxFuture<'_, InterpretationResult<QueryResult>> {
     let processor = if query.args.requires_inmemory_processing(RelationLoadStrategy::Query) {
         Some(InMemoryRecordProcessor::new_from_query_args(&mut query.args))
@@ -124,7 +123,7 @@ fn read_many_by_queries(
                 query.args.clone(),
                 &query.selected_fields,
                 query.relation_load_strategy,
-                traceparent,
+                query_context.sql_trace(),
             )
             .await?;
 
@@ -137,7 +136,7 @@ fn read_many_by_queries(
         if records.records.is_empty() && query.options.contains(QueryOption::ThrowOnEmpty) {
             record_not_found()
         } else {
-            let nested: Vec<QueryResult> = process_nested(tx, query.nested, Some(&records), traceparent).await?;
+            let nested: Vec<QueryResult> = process_nested(tx, query.nested, Some(&records), query_context).await?;
 
             Ok(RecordSelection {
                 name: query.name,
@@ -157,7 +156,7 @@ fn read_many_by_queries(
 fn read_many_by_joins(
     tx: &mut dyn ConnectionLike,
     query: ManyRecordsQuery,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> BoxFuture<'_, InterpretationResult<QueryResult>> {
     if !can_support_relation_load_strategy() {
         unreachable!()
@@ -169,7 +168,7 @@ fn read_many_by_joins(
                 query.args.clone(),
                 &query.selected_fields,
                 query.relation_load_strategy,
-                traceparent,
+                query_context.sql_trace(),
             )
             .await?;
 
@@ -210,13 +209,13 @@ fn read_related<'conn>(
     tx: &'conn mut dyn ConnectionLike,
     mut query: RelatedRecordsQuery,
     parent_result: Option<&'conn ManyRecords>,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> BoxFuture<'conn, InterpretationResult<QueryResult>> {
     let fut = async move {
         let relation = query.parent_field.relation();
 
         let records = if relation.is_many_to_many() {
-            nested_read::m2m(tx, &mut query, parent_result, traceparent).await?
+            nested_read::m2m(tx, &mut query, parent_result, query_context.clone()).await?
         } else {
             nested_read::one2m(
                 tx,
@@ -225,12 +224,12 @@ fn read_related<'conn>(
                 parent_result,
                 query.args.clone(),
                 &query.selected_fields,
-                traceparent,
+                query_context.clone(),
             )
             .await?
         };
         let model = query.parent_field.related_model();
-        let nested: Vec<QueryResult> = process_nested(tx, query.nested, Some(&records), traceparent).await?;
+        let nested: Vec<QueryResult> = process_nested(tx, query.nested, Some(&records), query_context).await?;
 
         Ok(RecordSelection {
             name: query.name,
@@ -249,7 +248,7 @@ fn read_related<'conn>(
 async fn aggregate(
     tx: &mut dyn ConnectionLike,
     query: AggregateRecordsQuery,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     let selection_order = query.selection_order;
 
@@ -260,7 +259,7 @@ async fn aggregate(
             query.selectors,
             query.group_by,
             query.having,
-            traceparent,
+            query_context.sql_trace(),
         )
         .await?;
 
@@ -274,7 +273,7 @@ pub(crate) fn process_nested<'conn>(
     tx: &'conn mut dyn ConnectionLike,
     nested: Vec<ReadQuery>,
     parent_result: Option<&'conn ManyRecords>,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> BoxFuture<'conn, InterpretationResult<Vec<QueryResult>>> {
     let fut = async move {
         let results = if matches!(parent_result, Some(parent_records) if parent_records.records.is_empty()) {
@@ -285,7 +284,7 @@ pub(crate) fn process_nested<'conn>(
             let mut nested_results = Vec::with_capacity(nested.len());
 
             for query in nested {
-                let result = execute(tx, query, parent_result, traceparent).await?;
+                let result = execute(tx, query, parent_result, query_context.clone()).await?;
                 nested_results.push(result);
             }
 

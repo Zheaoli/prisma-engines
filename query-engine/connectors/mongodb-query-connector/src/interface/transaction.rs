@@ -4,7 +4,7 @@ use connector_interface::{ConnectionLike, ReadOperations, Transaction, UpdateTyp
 use mongodb::options::{Acknowledgment, ReadConcern, TransactionOptions, WriteConcern};
 use prisma_metrics::{PRISMA_CLIENT_QUERIES_ACTIVE, guards::GaugeGuard};
 use query_structure::{RelationLoadStrategy, SelectionResult};
-use telemetry::TraceParent;
+use telemetry::SqlTrace;
 
 use super::*;
 use crate::{
@@ -83,7 +83,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         args: query_structure::WriteArgs,
         // The field selection on a create is never used on MongoDB as it cannot return more than the ID.
         _selected_fields: FieldSelection,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<SingleRecord> {
         catch(write::create_record(
             &self.connection.database,
@@ -99,7 +99,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         model: &Model,
         args: Vec<query_structure::WriteArgs>,
         skip_duplicates: bool,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<usize> {
         catch(write::create_records(
             &self.connection.database,
@@ -117,7 +117,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         _args: Vec<query_structure::WriteArgs>,
         _skip_duplicates: bool,
         _selected_fields: FieldSelection,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<ManyRecords> {
         unimplemented!()
     }
@@ -128,7 +128,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         record_filter: query_structure::RecordFilter,
         args: query_structure::WriteArgs,
         limit: Option<usize>,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<usize> {
         catch(async move {
             let result = write::update_records(
@@ -152,7 +152,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         _args: query_structure::WriteArgs,
         _selected_fields: FieldSelection,
         _limit: Option<usize>,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<ManyRecords> {
         unimplemented!()
     }
@@ -163,7 +163,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         record_filter: query_structure::RecordFilter,
         args: query_structure::WriteArgs,
         selected_fields: Option<FieldSelection>,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<Option<SingleRecord>> {
         catch(async move {
             let result = write::update_records(
@@ -194,7 +194,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         model: &Model,
         record_filter: query_structure::RecordFilter,
         limit: Option<usize>,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<usize> {
         catch(write::delete_records(
             &self.connection.database,
@@ -211,7 +211,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         model: &Model,
         record_filter: query_structure::RecordFilter,
         selected_fields: FieldSelection,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<SingleRecord> {
         catch(write::delete_record(
             &self.connection.database,
@@ -226,7 +226,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
     async fn native_upsert_record(
         &mut self,
         _upsert: connector_interface::NativeUpsert,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<SingleRecord> {
         unimplemented!("Native upsert is not currently supported.")
     }
@@ -236,7 +236,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         field: &RelationFieldRef,
         parent_id: &SelectionResult,
         child_ids: &[SelectionResult],
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<()> {
         catch(write::m2m_connect(
             &self.connection.database,
@@ -253,7 +253,7 @@ impl WriteOperations for MongoDbTransaction<'_> {
         field: &RelationFieldRef,
         parent_id: &SelectionResult,
         child_ids: &[SelectionResult],
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<()> {
         catch(write::m2m_disconnect(
             &self.connection.database,
@@ -299,7 +299,7 @@ impl ReadOperations for MongoDbTransaction<'_> {
         filter: &query_structure::Filter,
         selected_fields: &FieldSelection,
         _relation_load_strategy: RelationLoadStrategy,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<Option<SingleRecord>> {
         catch(read::get_single_record(
             &self.connection.database,
@@ -317,7 +317,7 @@ impl ReadOperations for MongoDbTransaction<'_> {
         query_arguments: query_structure::QueryArguments,
         selected_fields: &FieldSelection,
         _relation_load_strategy: RelationLoadStrategy,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<ManyRecords> {
         catch(read::get_many_records(
             &self.connection.database,
@@ -333,7 +333,7 @@ impl ReadOperations for MongoDbTransaction<'_> {
         &mut self,
         from_field: &RelationFieldRef,
         from_record_ids: &[SelectionResult],
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<Vec<(SelectionResult, SelectionResult)>> {
         catch(read::get_related_m2m_record_ids(
             &self.connection.database,
@@ -351,7 +351,7 @@ impl ReadOperations for MongoDbTransaction<'_> {
         selections: Vec<query_structure::AggregationSelection>,
         group_by: Vec<ScalarFieldRef>,
         having: Option<query_structure::Filter>,
-        _traceparent: Option<TraceParent>,
+        _traceparent: SqlTrace,
     ) -> connector_interface::Result<Vec<connector_interface::AggregationRow>> {
         catch(aggregate::aggregate(
             &self.connection.database,

@@ -37,6 +37,7 @@ impl JsonRequest {
                     model_name,
                     action: Action::new(query_tag),
                     query: graphql_selection_to_json_field_query(selection, &schema_field),
+                    sql_comments: None,
                 };
 
                 Ok(output)

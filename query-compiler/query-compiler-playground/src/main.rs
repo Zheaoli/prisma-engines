@@ -68,7 +68,7 @@ pub fn main() -> anyhow::Result<()> {
     }))?;
 
     let request = RequestBody::Json(JsonBody::Single(query));
-    let doc = request.into_doc(&query_schema)?;
+    let (doc, _sql_comments) = request.into_doc(&query_schema)?;
 
     let QueryDocument::Single(query) = doc else {
         anyhow::bail!("expected single query");
@@ -81,7 +81,7 @@ pub fn main() -> anyhow::Result<()> {
     println!("{graph}");
     render_query_graph(&graph)?;
 
-    let ctx = Context::new(&connection_info, None);
+    let ctx = Context::new(&connection_info, Default::default());
     let builder = SqlQueryBuilder::<Postgres<'_>>::new(ctx);
 
     let expr = query_compiler::translate(graph, &builder)?;

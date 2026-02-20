@@ -356,10 +356,10 @@ impl QueryEngine {
             let engine = inner.as_engine()?;
 
             let request = RequestBody::try_from_str(&request, engine.engine_protocol())?;
-            let QueryDocument::Single(op) = request
+            let (doc, _sql_comments) = request
                 .into_doc(engine.query_schema())
-                .map_err(|err| napi::Error::from_reason(err.to_string()))?
-            else {
+                .map_err(|err| napi::Error::from_reason(err.to_string()))?;
+            let QueryDocument::Single(op) = doc else {
                 return Err(napi::Error::from_reason("Unexpected batch request".to_string()));
             };
 

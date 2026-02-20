@@ -103,7 +103,7 @@ impl SelectDefinition for QueryArguments {
         let select_ast = Select::from_table(joined_table)
             .so_that(conditions)
             .offset(skip as usize)
-            .add_traceparent(ctx.traceparent);
+            .add_trace_id(ctx);
 
         let select_ast = order_by_definitions
             .iter()
@@ -140,7 +140,7 @@ where
     let (select, additional_selection_set) = query_arguments.into_select(model, virtual_selections, ctx);
     let select = columns.fold(select, |acc, col| acc.column(col));
 
-    let select = select.add_traceparent(ctx.traceparent);
+    let select = select.add_trace_id(ctx);
 
     additional_selection_set
         .into_iter()
@@ -183,7 +183,7 @@ pub fn aggregate(
     let sub_query = get_records(model, columns.into_iter(), &[], args, ctx);
     let sub_table = Table::from(sub_query).alias("sub");
     selections.iter().fold(
-        Select::from_table(sub_table).add_traceparent(ctx.traceparent),
+        Select::from_table(sub_table).add_trace_id(ctx),
         |acc, sel| apply_aggregate_selections(acc, sel, ctx, ColumnStyle::ImplicitTable),
     )
 }
@@ -203,7 +203,7 @@ pub fn group_by_aggregate(
 
     let grouped = group_by
         .into_iter()
-        .fold(select_query.add_traceparent(ctx.traceparent), |query, field| {
+        .fold(select_query.add_trace_id(ctx), |query, field| {
             query.group_by(field.as_column(ctx))
         });
 

@@ -29,6 +29,7 @@ impl<'a> JsonProtocolAdapter<'a> {
             model_name,
             action,
             query,
+            ..
         } = query;
 
         let (operation_type, field) = self.find_schema_field(model_name, action)?;

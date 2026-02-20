@@ -103,7 +103,8 @@ impl QueryCompiler {
     pub fn compile(&self, request: String) -> Result<JsValue, JsCompileError> {
         with_sync_unevaluated_request_context(move || {
             let request = RequestBody::try_from_str(&request, self.protocol)?;
-            let QueryDocument::Single(op) = request.into_doc(&self.schema)? else {
+            let (doc, _sql_comments) = request.into_doc(&self.schema)?;
+            let QueryDocument::Single(op) = doc else {
                 return Err(JsCompileError::plain("Unexpected batch request"));
             };
             let plan = query_compiler::compile(&self.schema, op, &self.connection_info)?;
@@ -115,7 +116,8 @@ impl QueryCompiler {
     pub fn compile_batch(&self, request: String) -> Result<JsValue, JsCompileError> {
         with_sync_unevaluated_request_context(move || {
             let request = RequestBody::try_from_str(&request, self.protocol)?;
-            let response = match request.into_doc(&self.schema)? {
+            let (doc, _sql_comments) = request.into_doc(&self.schema)?;
+            let response = match doc {
                 QueryDocument::Single(op) => {
                     let plan = query_compiler::compile(&self.schema, op, &self.connection_info)?;
                     BatchResponse::Multi { plans: vec![plan] }

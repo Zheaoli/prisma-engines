@@ -1,0 +1,20 @@
+{
+  "modelName": "User",
+  "action": "findMany",
+  "query": {
+    "arguments": {
+      "where": {
+        "email": {
+          "contains": "prisma.io"
+        }
+      }
+    },
+    "selection": {
+      "$scalars": true
+    }
+  },
+  "sqlComments": {
+    "route": "/api/users",
+    "controller": "UserController"
+  }
+}

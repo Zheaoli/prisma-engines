@@ -34,7 +34,7 @@ pub fn compile(
     query: Operation,
     connection_info: &ConnectionInfo,
 ) -> Result<Expression, CompileError> {
-    let ctx = Context::new(connection_info, None);
+    let ctx = Context::new(connection_info, Default::default());
     let (graph, _serializer) = QueryGraphBuilder::new(query_schema)
         .without_eager_default_evaluation()
         .build(query)?;

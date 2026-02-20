@@ -18,7 +18,7 @@ use query_structure::{
 };
 use sql_query_builder::Context;
 use std::{collections::HashMap, str::FromStr};
-use telemetry::TraceParent;
+use telemetry::SqlTrace;
 
 pub(crate) struct SqlConnection<C> {
     inner: C,
@@ -93,10 +93,10 @@ where
         filter: &Filter,
         selected_fields: &FieldSelection,
         relation_load_strategy: RelationLoadStrategy,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Option<SingleRecord>> {
         // [Composites] todo: FieldSelection -> ModelProjection conversion
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             read::get_single_record(
@@ -117,9 +117,9 @@ where
         query_arguments: QueryArguments,
         selected_fields: &FieldSelection,
         relation_load_strategy: RelationLoadStrategy,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<ManyRecords> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             read::get_many_records(
@@ -138,9 +138,9 @@ where
         &mut self,
         from_field: &RelationFieldRef,
         from_record_ids: &[SelectionResult],
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Vec<(SelectionResult, SelectionResult)>> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             read::get_related_m2m_record_ids(&self.inner, from_field, from_record_ids, &ctx),
@@ -155,9 +155,9 @@ where
         selections: Vec<AggregationSelection>,
         group_by: Vec<ScalarFieldRef>,
         having: Option<Filter>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Vec<AggregationRow>> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             read::aggregate(&self.inner, model, query_arguments, selections, group_by, having, &ctx),
@@ -176,9 +176,9 @@ where
         model: &Model,
         args: WriteArgs,
         selected_fields: FieldSelection,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<SingleRecord> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::create_record(
@@ -198,9 +198,9 @@ where
         model: &Model,
         args: Vec<WriteArgs>,
         skip_duplicates: bool,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<usize> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::create_records_count(&self.inner, model, args, skip_duplicates, &ctx),
@@ -214,9 +214,9 @@ where
         args: Vec<WriteArgs>,
         skip_duplicates: bool,
         selected_fields: FieldSelection,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<ManyRecords> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::create_records_returning(&self.inner, model, args, skip_duplicates, selected_fields, &ctx),
@@ -230,9 +230,9 @@ where
         record_filter: RecordFilter,
         args: WriteArgs,
         limit: Option<usize>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<usize> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::update_records(&self.inner, model, record_filter, args, limit, &ctx),
@@ -247,9 +247,9 @@ where
         args: WriteArgs,
         selected_fields: FieldSelection,
         limit: Option<usize>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<ManyRecords> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::update_records_returning(&self.inner, model, record_filter, args, selected_fields, limit, &ctx),
@@ -263,9 +263,9 @@ where
         record_filter: RecordFilter,
         args: WriteArgs,
         selected_fields: Option<FieldSelection>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<Option<SingleRecord>> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::update_record(&self.inner, model, record_filter, args, selected_fields, &ctx),
@@ -278,9 +278,9 @@ where
         model: &Model,
         record_filter: RecordFilter,
         limit: Option<usize>,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<usize> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::delete_records(&self.inner, model, record_filter, limit, &ctx),
@@ -293,9 +293,9 @@ where
         model: &Model,
         record_filter: RecordFilter,
         selected_fields: FieldSelection,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<SingleRecord> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::delete_record(&self.inner, model, record_filter, selected_fields, &ctx),
@@ -306,9 +306,9 @@ where
     async fn native_upsert_record(
         &mut self,
         upsert: connector_interface::NativeUpsert,
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<SingleRecord> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(&self.connection_info, upsert::native_upsert(&self.inner, upsert, &ctx)).await
     }
 
@@ -317,9 +317,9 @@ where
         field: &RelationFieldRef,
         parent_id: &SelectionResult,
         child_ids: &[SelectionResult],
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<()> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::m2m_connect(&self.inner, field, parent_id, child_ids, &ctx),
@@ -332,9 +332,9 @@ where
         field: &RelationFieldRef,
         parent_id: &SelectionResult,
         child_ids: &[SelectionResult],
-        traceparent: Option<TraceParent>,
+        trace: SqlTrace,
     ) -> connector::Result<()> {
-        let ctx = Context::new(&self.connection_info, traceparent);
+        let ctx = Context::new(&self.connection_info, trace);
         catch(
             &self.connection_info,
             write::m2m_disconnect(&self.inner, field, parent_id, child_ids, &ctx),

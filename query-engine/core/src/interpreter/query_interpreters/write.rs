@@ -1,30 +1,29 @@
 use crate::{
-    QueryResult, RecordSelection,
+    QueryContext, QueryResult, RecordSelection,
     interpreter::{InterpretationResult, InterpreterError},
     query_ast::*,
 };
 use connector::{ConnectionLike, NativeUpsert};
 use query_structure::{ManyRecords, RawJson};
 use sql_query_builder::write::split_write_args_by_shape;
-use telemetry::TraceParent;
 
 pub(crate) async fn execute(
     tx: &mut dyn ConnectionLike,
     write_query: WriteQuery,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     match write_query {
-        WriteQuery::CreateRecord(q) => create_one(tx, q, traceparent).await,
-        WriteQuery::CreateManyRecords(q) => create_many(tx, q, traceparent).await,
-        WriteQuery::UpdateRecord(q) => update_one(tx, q, traceparent).await,
-        WriteQuery::DeleteRecord(q) => delete_one(tx, q, traceparent).await,
-        WriteQuery::UpdateManyRecords(q) => update_many(tx, q, traceparent).await,
-        WriteQuery::DeleteManyRecords(q) => delete_many(tx, q, traceparent).await,
-        WriteQuery::ConnectRecords(q) => connect(tx, q, traceparent).await,
-        WriteQuery::DisconnectRecords(q) => disconnect(tx, q, traceparent).await,
+        WriteQuery::CreateRecord(q) => create_one(tx, q, query_context).await,
+        WriteQuery::CreateManyRecords(q) => create_many(tx, q, query_context).await,
+        WriteQuery::UpdateRecord(q) => update_one(tx, q, query_context).await,
+        WriteQuery::DeleteRecord(q) => delete_one(tx, q, query_context).await,
+        WriteQuery::UpdateManyRecords(q) => update_many(tx, q, query_context).await,
+        WriteQuery::DeleteManyRecords(q) => delete_many(tx, q, query_context).await,
+        WriteQuery::ConnectRecords(q) => connect(tx, q, query_context).await,
+        WriteQuery::DisconnectRecords(q) => disconnect(tx, q, query_context).await,
         WriteQuery::ExecuteRaw(q) => execute_raw(tx, q).await,
         WriteQuery::QueryRaw(q) => query_raw(tx, q).await,
-        WriteQuery::Upsert(q) => native_upsert(tx, q, traceparent).await,
+        WriteQuery::Upsert(q) => native_upsert(tx, q, query_context).await,
     }
 }
 
@@ -46,10 +45,10 @@ async fn execute_raw(tx: &mut dyn ConnectionLike, q: RawQuery) -> Interpretation
 async fn create_one(
     tx: &mut dyn ConnectionLike,
     q: CreateRecord,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     let res = tx
-        .create_record(&q.model, q.args, q.selected_fields, traceparent)
+        .create_record(&q.model, q.args, q.selected_fields, query_context.sql_trace())
         .await?;
 
     Ok(QueryResult::RecordSelection(Some(Box::new(RecordSelection {
@@ -65,19 +64,19 @@ async fn create_one(
 async fn create_many(
     tx: &mut dyn ConnectionLike,
     q: CreateManyRecords,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     if q.split_by_shape {
-        return create_many_split_by_shape(tx, q, traceparent).await;
+        return create_many_split_by_shape(tx, q, query_context).await;
     }
 
     if let Some(selected_fields) = q.selected_fields {
         let records = tx
-            .create_records_returning(&q.model, q.args, q.skip_duplicates, selected_fields.fields, traceparent)
+            .create_records_returning(&q.model, q.args, q.skip_duplicates, selected_fields.fields, query_context.sql_trace())
             .await?;
 
         let nested: Vec<QueryResult> =
-            super::read::process_nested(tx, selected_fields.nested, Some(&records), traceparent).await?;
+            super::read::process_nested(tx, selected_fields.nested, Some(&records), query_context).await?;
 
         let selection = RecordSelection {
             name: q.name,
@@ -91,7 +90,7 @@ async fn create_many(
         Ok(QueryResult::RecordSelection(Some(Box::new(selection))))
     } else {
         let affected_records = tx
-            .create_records(&q.model, q.args, q.skip_duplicates, traceparent)
+            .create_records(&q.model, q.args, q.skip_duplicates, query_context.sql_trace())
             .await?;
 
         Ok(QueryResult::Count(affected_records))
@@ -105,7 +104,7 @@ async fn create_many(
 async fn create_many_split_by_shape(
     tx: &mut dyn ConnectionLike,
     q: CreateManyRecords,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     if let Some(selected_fields) = q.selected_fields {
         let mut result: Option<ManyRecords> = None;
@@ -117,7 +116,7 @@ async fn create_many_split_by_shape(
                     args,
                     q.skip_duplicates,
                     selected_fields.fields.clone(),
-                    traceparent,
+                    query_context.sql_trace(),
                 )
                 .await?;
 
@@ -135,12 +134,12 @@ async fn create_many_split_by_shape(
             result
         } else {
             // Empty result means that the list of arguments was empty as well.
-            tx.create_records_returning(&q.model, vec![], q.skip_duplicates, selected_fields.fields, traceparent)
+            tx.create_records_returning(&q.model, vec![], q.skip_duplicates, selected_fields.fields, query_context.sql_trace())
                 .await?
         };
 
         let nested: Vec<QueryResult> =
-            super::read::process_nested(tx, selected_fields.nested.clone(), Some(&records), traceparent).await?;
+            super::read::process_nested(tx, selected_fields.nested.clone(), Some(&records), query_context).await?;
 
         let selection = RecordSelection {
             name: q.name,
@@ -157,7 +156,7 @@ async fn create_many_split_by_shape(
 
         for args in split_write_args_by_shape(&q.model, q.args) {
             let affected_records = tx
-                .create_records(&q.model, args, q.skip_duplicates, traceparent)
+                .create_records(&q.model, args, q.skip_duplicates, query_context.sql_trace())
                 .await?;
             result += affected_records;
         }
@@ -169,7 +168,7 @@ async fn create_many_split_by_shape(
 async fn update_one(
     tx: &mut dyn ConnectionLike,
     q: UpdateRecord,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     let res = tx
         .update_record(
@@ -177,7 +176,7 @@ async fn update_one(
             q.record_filter().clone(),
             q.args().clone(),
             q.selected_fields(),
-            traceparent,
+            query_context.sql_trace(),
         )
         .await?;
 
@@ -209,9 +208,9 @@ async fn update_one(
 async fn native_upsert(
     tx: &mut dyn ConnectionLike,
     query: NativeUpsert,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
-    let scalars = tx.native_upsert_record(query.clone(), traceparent).await?;
+    let scalars = tx.native_upsert_record(query.clone(), query_context.sql_trace()).await?;
 
     Ok(RecordSelection {
         name: query.name().to_string(),
@@ -227,14 +226,14 @@ async fn native_upsert(
 async fn delete_one(
     tx: &mut dyn ConnectionLike,
     q: DeleteRecord,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     // We need to ensure that we have a record finder, else we delete everything (conversion to empty filter).
     let filter = q.record_filter;
 
     if let Some(selected_fields) = q.selected_fields {
         let record = tx
-            .delete_record(&q.model, filter, selected_fields.fields, traceparent)
+            .delete_record(&q.model, filter, selected_fields.fields, query_context.sql_trace())
             .await?;
         let selection = RecordSelection {
             name: q.name,
@@ -247,7 +246,7 @@ async fn delete_one(
 
         Ok(QueryResult::RecordSelection(Some(Box::new(selection))))
     } else {
-        let result = tx.delete_records(&q.model, filter, None, traceparent).await?;
+        let result = tx.delete_records(&q.model, filter, None, query_context.sql_trace()).await?;
         Ok(QueryResult::Count(result))
     }
 }
@@ -255,7 +254,7 @@ async fn delete_one(
 async fn update_many(
     tx: &mut dyn ConnectionLike,
     q: UpdateManyRecords,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     if let Some(selected_fields) = q.selected_fields {
         let records = tx
@@ -265,12 +264,12 @@ async fn update_many(
                 q.args,
                 selected_fields.fields,
                 q.limit,
-                traceparent,
+                query_context.sql_trace(),
             )
             .await?;
 
         let nested: Vec<QueryResult> =
-            super::read::process_nested(tx, selected_fields.nested, Some(&records), traceparent).await?;
+            super::read::process_nested(tx, selected_fields.nested, Some(&records), query_context).await?;
 
         let selection = RecordSelection {
             name: q.name,
@@ -284,7 +283,7 @@ async fn update_many(
         Ok(QueryResult::RecordSelection(Some(Box::new(selection))))
     } else {
         let affected_records = tx
-            .update_records(&q.model, q.record_filter, q.args, q.limit, traceparent)
+            .update_records(&q.model, q.record_filter, q.args, q.limit, query_context.sql_trace())
             .await?;
 
         Ok(QueryResult::Count(affected_records))
@@ -294,10 +293,10 @@ async fn update_many(
 async fn delete_many(
     tx: &mut dyn ConnectionLike,
     q: DeleteManyRecords,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     let res = tx
-        .delete_records(&q.model, q.record_filter, q.limit, traceparent)
+        .delete_records(&q.model, q.record_filter, q.limit, query_context.sql_trace())
         .await?;
 
     Ok(QueryResult::Count(res))
@@ -306,13 +305,13 @@ async fn delete_many(
 async fn connect(
     tx: &mut dyn ConnectionLike,
     q: ConnectRecords,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     tx.m2m_connect(
         &q.relation_field,
         &q.parent_id.expect("Expected parent record ID to be set for connect"),
         &q.child_ids,
-        traceparent,
+        query_context.sql_trace(),
     )
     .await?;
 
@@ -322,13 +321,13 @@ async fn connect(
 async fn disconnect(
     tx: &mut dyn ConnectionLike,
     q: DisconnectRecords,
-    traceparent: Option<TraceParent>,
+    query_context: QueryContext,
 ) -> InterpretationResult<QueryResult> {
     tx.m2m_disconnect(
         &q.relation_field,
         &q.parent_id.expect("Expected parent record ID to be set for disconnect"),
         &q.child_ids,
-        traceparent,
+        query_context.sql_trace(),
     )
     .await?;
 
