@@ -16,29 +16,6 @@ jobs:
     with:
       commit: ${{ github.sha }}
 
-  build-macos-intel:
-    name: Build Engines for Apple Intel
-    uses: ./.github/workflows/build-engines-apple-intel-template.yml
-    with:
-      commit: ${{ github.sha }}
-
-  build-macos-silicon:
-    name: Build Engines for Apple Silicon
-    uses: ./.github/workflows/build-engines-apple-silicon-template.yml
-    with:
-      commit: ${{ github.sha }}
-
-  build-react-native:
-    name: Build Engines for React Native
-    uses: ./.github/workflows/build-engines-react-native-template.yml
-    with:
-      commit: ${{ github.sha }}
-
-  build-windows:
-    name: Build Engines for Windows
-    uses: ./.github/workflows/build-engines-windows-template.yml
-    with:
-      commit: ${{ github.sha }}
 
   github-release:
     name: Create GitHub Release ${{ inputs.tag_name }}
@@ -47,10 +24,6 @@ jobs:
       contents: write
     needs:
       - build-linux
-      - build-macos-intel
-      - build-macos-silicon
-      - build-react-native
-      - build-windows
     steps:
       - name: Checkout git repository
         uses: actions/checkout@v4
