@@ -1,0 +1,142 @@
+name: Release to GitHub
+run-name: Release ${{ inputs.tag_name }} to GitHub Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-linux:
+    name: Build Engines for Linux
+    uses: ./.github/workflows/build-engines-linux-template.yml
+    with:
+      commit: ${{ github.sha }}
+
+  build-macos-intel:
+    name: Build Engines for Apple Intel
+    uses: ./.github/workflows/build-engines-apple-intel-template.yml
+    with:
+      commit: ${{ github.sha }}
+
+  build-macos-silicon:
+    name: Build Engines for Apple Silicon
+    uses: ./.github/workflows/build-engines-apple-silicon-template.yml
+    with:
+      commit: ${{ github.sha }}
+
+  build-react-native:
+    name: Build Engines for React Native
+    uses: ./.github/workflows/build-engines-react-native-template.yml
+    with:
+      commit: ${{ github.sha }}
+
+  build-windows:
+    name: Build Engines for Windows
+    uses: ./.github/workflows/build-engines-windows-template.yml
+    with:
+      commit: ${{ github.sha }}
+
+  github-release:
+    name: Create GitHub Release ${{ inputs.tag_name }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    needs:
+      - build-linux
+      - build-macos-intel
+      - build-macos-silicon
+      - build-react-native
+      - build-windows
+    steps:
+      - name: Checkout git repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: engines-artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -Rl engines-artifacts
+
+      - name: Duplicate engines for vendored OpenSSL targets
+        working-directory: engines-artifacts
+        run: |
+          cp -r rhel-openssl-1.0.x rhel-openssl-1.1.x
+          cp -r linux-arm64-openssl-1.0.x linux-arm64-openssl-1.1.x
+
+      - name: Duplicate engines for Debian
+        working-directory: engines-artifacts
+        run: |
+          cp -r rhel-openssl-1.0.x debian-openssl-1.0.x
+          cp -r rhel-openssl-1.1.x debian-openssl-1.1.x
+          cp -r rhel-openssl-3.0.x debian-openssl-3.0.x
+
+      - name: Create .zip for react-native
+        working-directory: engines-artifacts
+        run: |
+          mkdir react-native
+          zip -r react-native/binaries.zip ios android
+          rm -rf ios android
+
+      - name: 'Create compressed engine files (.gz)'
+        working-directory: engines-artifacts
+        run: |
+          set -eu
+
+          find . -type f -not -name "*.zip" | while read filename; do
+            gzip -c "$filename" > "$filename.gz"
+            echo "$filename.gz file created."
+          done
+
+      - name: 'Create SHA256 checksum files (.sha256)'
+        working-directory: engines-artifacts
+        run: |
+          set -eu
+
+          find . -type f | while read filename; do
+            sha256sum "$filename" > "$filename.sha256"
+            echo "$filename.sha256 file created."
+          done
+
+      - name: Flatten artifacts for GitHub Release
+        run: |
+          set -eu
+
+          mkdir -p release-assets
+
+          cd engines-artifacts
+          for dir in */; do
+            platform="${dir%/}"
+            for file in "$dir"*; do
+              [ -f "$file" ] || continue
+              basename="$(basename "$file")"
+              # Only include .gz, .zip, and .sha256 files (skip raw binaries and .sha256 of .sha256)
+              case "$basename" in
+                *.gz|*.zip) ;;
+                *.gz.sha256|*.zip.sha256) ;;
+                *) continue ;;
+              esac
+              cp "$file" "../release-assets/${platform}--${basename}"
+            done
+          done
+
+          echo "=== Release assets ==="
+          ls -la ../release-assets/
+          echo "Total assets: $(ls ../release-assets/ | wc -l)"
+
+      - name: Create GitHub Release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag_name }}" \
+            --title "${{ inputs.tag_name }}" \
+            --notes "Prisma Engines built from commit ${{ github.sha }} on branch ${{ github.ref_name }}" \
+            release-assets/*
+
+      - name: Cleanup
+        run: rm -rf engines-artifacts release-assets
